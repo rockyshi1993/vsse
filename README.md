@@ -6,8 +6,10 @@ Lightweight front-end SSE manager with single-connection multiplexing.
 支持全局与单次 POST 配置（headers/timeout/credentials/token）。
 
 ## 安装
-- 本地使用：本包为纯 JS，无需构建。直接以相对路径或包名引入即可。
-- 作为库发布到 npm 后：`npm i vsse`
+
+```shell
+- npm i vsse
+```
 
 ## 快速开始
 ```js
