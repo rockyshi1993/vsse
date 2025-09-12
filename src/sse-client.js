@@ -66,6 +66,8 @@ export class SSEClient {
     this.es = undefined;
     /** @type {Map<string,{ cb: Function, createdAt: number }>} */
     this.listeners = new Map();
+    /** @type {Set<Function>} 全局广播监听（无 requestId） */
+    this.globalListeners = new Set();
     this.backoffState = { attempts: 0 };
     /** @type {number|undefined} */
     this.idleTimer = undefined;
@@ -161,6 +163,22 @@ export class SSEClient {
     return { requestId, unsubscribe };
   }
 
+  /**
+   * 订阅“无 requestId”的全局广播
+   * @param {(evt:{event:SSEEventName, type?:string, payload?:any, code?:any, message?:string, sentAt?:number})=>void} cb
+   * @returns {() => void} unsubscribe
+   */
+  onBroadcast(cb) {
+    if (typeof cb !== 'function') throw new Error('onBroadcast(cb) requires a function');
+    this.globalListeners.add(cb);
+    // 若当前尚未连接且已有任意监听，则尝试建立连接
+    this.maybeConnect('onBroadcast');
+    return () => {
+      this.globalListeners.delete(cb);
+      this.checkIdle();
+    };
+  }
+
   /** 主动关闭 SSE 连接 */
   close() {
     if (this.es) {
@@ -187,7 +205,8 @@ export class SSEClient {
     this._boundBump = () => {
       this.lastActiveAt = Date.now();
       this.checkIdle();
-      if (!this.es && this.listeners.size > 0) this.maybeConnect('activity');
+      const hasAnyListener = this.listeners.size > 0 || this.globalListeners.size > 0;
+      if (!this.es && hasAnyListener) this.maybeConnect('activity');
     };
     this._activityEvents = ['click','keydown','mousemove','scroll','touchstart','visibilitychange'];
     this._activityEvents.forEach(evt =>
@@ -208,11 +227,14 @@ export class SSEClient {
     }
     if (this._onOnline) window.removeEventListener('online', this._onOnline);
     if (this._onOffline) window.removeEventListener('offline', this._onOffline);
+    // 清理全局监听，防止内存泄漏
+    if (this.globalListeners) this.globalListeners.clear();
   }
 
   maybeConnect() {
     if (this.es) return;
-    if (this.listeners.size === 0) return; // 懒连接
+    const hasAnyListener = this.listeners.size > 0 || this.globalListeners.size > 0;
+    if (!hasAnyListener) return; // 懒连接：仅当存在任意监听时才连接
     const url = this.opts.url;
     if (!url) return;
 
@@ -271,13 +293,34 @@ export class SSEClient {
     const { requestId, event } = msg;
     if (requestId && this.listeners.has(requestId)) {
       const l = this.listeners.get(requestId);
-      l.cb({ event, payload: msg.payload });
+      // 透传顶层字段，便于上层根据 type/code 等进行分发或埋点
+      l.cb({
+        event,
+        payload: msg.payload,
+        type: msg.type,
+        code: msg.code,
+        message: msg.message,
+        sentAt: msg.sentAt,
+      });
       if (event === 'done' || event === 'error') {
         this.listeners.delete(requestId);
         this.checkIdle();
       }
     } else if (!requestId) {
-      // 可选：全局广播（当前忽略）
+      // 全局广播：无 requestId 的消息按顺序通知所有 onBroadcast 订阅者
+      if (this.globalListeners && this.globalListeners.size > 0) {
+        const evt = {
+          event,
+          payload: msg.payload,
+          type: msg.type,
+          code: msg.code,
+          message: msg.message,
+          sentAt: msg.sentAt,
+        };
+        this.globalListeners.forEach(cb => {
+          try { cb(evt); } catch(_) {}
+        });
+      }
     }
   }
 
@@ -312,8 +355,8 @@ export class SSEClient {
     const idle = this.opts.idleTimeout ?? 30_000;
     if (!idle) return;
     if (!this.es) return; // 已关闭
-    if (this.listeners.size === 0) {
-      // 仅在无监听时按 idle 关闭
+    if (this.listeners.size === 0 && this.globalListeners.size === 0) {
+      // 仅在“无任何监听器”时按 idle 关闭
       this.idleTimer = window.setTimeout(() => this.close('idle'), idle);
       return;
     }

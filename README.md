@@ -35,12 +35,17 @@ const sse = new SSEClient({
 const { requestId, unsubscribe } = await sse.postAndListen(
   "/api/doA",
   { foo: "bar" },
-  ({ event, payload }) => {
-    // 你的后端 payload 示例：{ type: 'need' | 'text', content: ... }
-    if (payload && payload.type === "need") {
-      // 渲染需要型内容
-    } else if (payload && payload.type === "text") {
-      // 流式文本
+  ({ event, type, payload }) => {
+    // 推荐服务端形态：顶层包含 type，正文在 payload.content
+    // 例如：progress + type='need' | 'chat'
+    if (event === 'progress' && type === 'need') {
+      // 渲染需求卡片（HTML/Markdown），内容在 payload.content
+    } else if (event === 'progress' && type === 'chat') {
+      // 流式文本分片，内容在 payload.content
+    } else if (event === 'done') {
+      // 流结束
+    } else if (event === 'error') {
+      // 错误
     }
   },
   {
@@ -194,18 +199,53 @@ sse.close();
 sse.destroy();
 ```
 
+## 全局广播（onBroadcast）
+- 支持订阅“无 requestId”的系统级/会话级 SSE 消息。
+- 使用 onBroadcast(cb) 注册监听；返回的函数可用于取消订阅。
+- 懒连接与空闲关闭会同时考虑“按 requestId 监听器”和“全局监听器”。
+
+示例：
+```js
+import { SSEClient } from 'vsse';
+const sse = new SSEClient({ url: '/sse?userId=alice', eventName: 'notify' });
+
+// 订阅全局广播（例如系统公告/会话状态）
+const off = sse.onBroadcast(({ event, type, payload }) => {
+  if (event === 'progress' && type === 'system') {
+    console.log('系统公告：', payload?.content);
+  }
+});
+
+// 取消订阅
+// off();
+```
+
+服务端发送约定（无 requestId）：
+```
+event: notify
+data: {"event":"progress","type":"system","payload":{"content":"今晚 2:00 维护"},"sentAt":1736720000000}
+```
+
 ## 服务端事件格式与路由约定
-- 建议每条 SSE data 为 JSON：{ requestId, event, payload }。
+- 建议每条 SSE data 为 JSON：{ requestId, event, payload, type?, code?, message?, sentAt? }。
+  - 约定：正文内容放在 payload（如 payload.content）；分类/分流信息放在顶层 type（如 'need' | 'chat'）。
+  - 本客户端会将顶层的 type/code/message/sentAt 原样透传给回调（即回调参数为 { event, type, payload, code, message, sentAt }）。
 - 若 data 无 event 字段，将回退使用原生 SSE 事件名 ev.type（如 message/notify）。
 - event 为 'done' 或 'error' 时，该 requestId 的监听会自动移除。
 
 示例：
 ```
+# 进度：需求卡
 event: notify
-data: {"requestId":"<uuid>","event":"progress","payload":{"ratio":0.5}}
+data: {"requestId":"<uuid>","event":"progress","type":"need","payload":{"content":"<html or markdown>"}}
 
+# 进度：聊天分片
 event: notify
-data: {"requestId":"<uuid>","event":"done","payload":{"result":"ok"}}
+data: {"requestId":"<uuid>","event":"progress","type":"chat","payload":{"content":"文本分片"}}
+
+# 完成
+event: notify
+data: {"requestId":"<uuid>","event":"done","payload":{"content":"完整文本","length":1234}}
 ```
 
 ## CORS、凭据与 EventSource 限制
@@ -237,8 +277,8 @@ data: {"requestId":"<uuid>","event":"done","payload":{"result":"ok"}}
 - 是否在大量任务场景触及 maxListeners 限制？
 
 ## 多任务复用与懒连接
-- 仅当存在至少一个监听器时才建立 SSE 连接（懒连接）。
-- 多个 postAndListen 共享同一连接，通过 requestId 路由到各自回调。
+- 仅当存在至少一个监听器时才建立 SSE 连接（懒连接），包括按 requestId 的监听器与全局监听器。
+- 多个 postAndListen 共享同一连接，通过 requestId 路由到各自回调；无 requestId 的消息会被 onBroadcast(cb) 接收。
 
 ```js
 const a = await sse.postAndListen('/api/a', {...}, onA);

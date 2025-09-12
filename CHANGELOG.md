@@ -6,12 +6,14 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 ### Added
+- Global broadcast listeners: `onBroadcast(cb)` to receive messages without `requestId` (e.g., system announcements). Returns `unsubscribe`.
 - destroy(): clean up global event listeners and timers to prevent memory leaks.
 - Event parsing compatibility: if JSON has no `event` field, fall back to SSE native `ev.type`.
-- Docs: Expand README with heartbeat, backoff, sseWithCredentials, per-call overrides, lifecycle, FAQ and troubleshooting.
+- Docs: Expanded README with heartbeat, backoff, sseWithCredentials, per-call overrides, lifecycle, FAQ and troubleshooting; added global broadcast docs and examples.
 
 ### Changed
-- Idle strategy: do not close SSE due to user inactivity when there are active listeners; receiving messages counts as activity.
+- dispatch(): now forwards top-level fields `type`, `code`, `message`, `sentAt` to the callback as `{ event, type, payload, code, message, sentAt }` for easier routing and analytics. Backward compatible.
+- Lazy connection and idle-close now consider both per-request listeners and global broadcast listeners.
 - Default `sseWithCredentials` is now `false`. Enable explicitly when the server allows credentials.
 
 ### Fixed
