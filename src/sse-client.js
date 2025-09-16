@@ -14,6 +14,14 @@
  * @property {string=} requestId
  * @property {SSEEventName} event
  * @property {T=} payload
+ * @property {string=} type
+ * @property {any=} code
+ * @property {string=} message
+ * @property {number=} sentAt
+ * @property {number=} seq        // 可选：序号（若服务端提供）
+ * @property {number=} total      // 可选：总数（若服务端提供）
+ * @property {any=} meta          // 可选：元信息（若服务端提供）
+ * // 说明：除上述常见字段外，其余顶层字段也会原样透传至回调参数
  */
 
 /**
@@ -103,7 +111,7 @@ export class SSEClient {
    * @template T
    * @param {string} postUrl
    * @param {any} body
-   * @param {(msg:{ event:SSEEventName, payload?:T })=>void} onEvent
+   * @param {(msg:SSEMessage<T>)=>void} onEvent
    * @param {(PostOptions & { requestId?: string })=} options
    * @returns {Promise<ListenerHandle>}
    */
@@ -165,7 +173,7 @@ export class SSEClient {
 
   /**
    * 订阅“无 requestId”的全局广播
-   * @param {(evt:{event:SSEEventName, type?:string, payload?:any, code?:any, message?:string, sentAt?:number})=>void} cb
+   * @param {(evt:SSEMessage<any>)=>void} cb
    * @returns {() => void} unsubscribe
    */
   onBroadcast(cb) {
@@ -287,21 +295,14 @@ export class SSEClient {
   }
 
   /**
-   * @param {SSEMessage} msg
+   * @param {SSEMessage<any>} msg
    */
   dispatch(msg) {
     const { requestId, event } = msg;
     if (requestId && this.listeners.has(requestId)) {
       const l = this.listeners.get(requestId);
-      // 透传顶层字段，便于上层根据 type/code 等进行分发或埋点
-      l.cb({
-        event,
-        payload: msg.payload,
-        type: msg.type,
-        code: msg.code,
-        message: msg.message,
-        sentAt: msg.sentAt,
-      });
+      // 全量透传：不丢弃任何顶层字段
+      try { l.cb(msg); } catch (_) {}
       if (event === 'done' || event === 'error') {
         this.listeners.delete(requestId);
         this.checkIdle();
@@ -309,16 +310,8 @@ export class SSEClient {
     } else if (!requestId) {
       // 全局广播：无 requestId 的消息按顺序通知所有 onBroadcast 订阅者
       if (this.globalListeners && this.globalListeners.size > 0) {
-        const evt = {
-          event,
-          payload: msg.payload,
-          type: msg.type,
-          code: msg.code,
-          message: msg.message,
-          sentAt: msg.sentAt,
-        };
         this.globalListeners.forEach(cb => {
-          try { cb(evt); } catch(_) {}
+          try { cb(msg); } catch(_) {}
         });
       }
     }

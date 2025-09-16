@@ -12,7 +12,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 - Docs: Expanded README with heartbeat, backoff, sseWithCredentials, per-call overrides, lifecycle, FAQ and troubleshooting; added global broadcast docs and examples.
 
 ### Changed
-- dispatch(): now forwards top-level fields `type`, `code`, `message`, `sentAt` to the callback as `{ event, type, payload, code, message, sentAt }` for easier routing and analytics. Backward compatible.
+- dispatch(): now forwards the full message object to callbacks (all top-level fields are preserved). Backward compatible.
 - Lazy connection and idle-close now consider both per-request listeners and global broadcast listeners.
 - Default `sseWithCredentials` is now `false`. Enable explicitly when the server allows credentials.
 

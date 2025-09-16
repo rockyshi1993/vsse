@@ -35,16 +35,16 @@ const sse = new SSEClient({
 const { requestId, unsubscribe } = await sse.postAndListen(
   "/api/doA",
   { foo: "bar" },
-  ({ event, type, payload }) => {
+  ({ phase, type, payload }) => {
     // 推荐服务端形态：顶层包含 type，正文在 payload.content
     // 例如：progress + type='need' | 'chat'
-    if (event === 'progress' && type === 'need') {
+    if (phase === 'progress' && type === 'need') {
       // 渲染需求卡片（HTML/Markdown），内容在 payload.content
-    } else if (event === 'progress' && type === 'chat') {
+    } else if (phase === 'progress' && type === 'chat') {
       // 流式文本分片，内容在 payload.content
-    } else if (event === 'done') {
+    } else if (phase === 'done') {
       // 流结束
-    } else if (event === 'error') {
+    } else if (phase === 'error') {
       // 错误
     }
   },
@@ -57,6 +57,24 @@ const { requestId, unsubscribe } = await sse.postAndListen(
 
 // 手动取消前端监听（可选）
 unsubscribe();
+```
+
+### 回调参数：完整透传（不丢字段）
+- 自 vX.Y.Z（未发布，见 [Unreleased]）起，回调将收到服务端消息的“完整顶层字段”，包括但不限于：
+  - event、payload、type、code、message、sentAt、seq、total、meta、以及其他自定义字段。
+- 你可以直接根据 type/code 等进行分发或埋点，无需二次组装。
+
+示例：
+```js
+sse.postAndListen('/api/task', { q: 'hi' }, (msg) => {
+  // msg 形如：{ event:'progress', type:'chunk', payload:{ content:'...' }, code:123, sentAt: 1726450000000, extra:'x' }
+  if (msg.phase === 'progress' && msg.type === 'chunk') {
+    render(msg.payload?.content);
+  }
+  if (msg.phase === 'done') {
+    console.log('耗时(ms)=', Date.now() - (msg.sentAt ?? Date.now()));
+  }
+});
 ```
 
 ---
@@ -87,19 +105,19 @@ const sse = new SSEClient({
 import { SSEClient } from 'vsse';
 
 const sse = new SSEClient({
-  // ========== 连接与事件 ========== 
+  // ========== 连接与事件 ==========
   url: '/sse?userId=alice',            // 必填：SSE 服务地址
   eventName: 'message',                // 默认 'message'；若服务端使用 'notify'，改为 'notify'
 
-  // ========== 空闲与心跳 ========== 
+  // ========== 空闲与心跳 ==========
   idleTimeout: 30_000,                 // 默认 30_000ms；仅在“没有任何监听器”时按此关闭；设 0 关闭空闲断开
   withHeartbeat: true,                 // 默认 true；启用心跳监测（收到任意消息或 event=ping 视为心跳）
   expectedPingInterval: 15_000,        // 默认 15_000ms；超时判定为 2×该值内未收到任何消息⇒重连
 
-  // ========== 凭据与安全 ========== 
+  // ========== 凭据与安全 ==========
   sseWithCredentials: false,           // 默认 false；SSE 连接是否携带 Cookie；跨域需后端返回 ACAC 且精确 ACAO
 
-  // ========== POST 全局默认（单次可覆盖） ========== 
+  // ========== POST 全局默认（单次可覆盖） ==========
   defaultHeaders: {                    // 可选：POST 默认请求头
     'Content-Type': 'application/json',// 库会设置；可自定义再合并/覆盖
     'X-App': 'demo',
@@ -108,7 +126,7 @@ const sse = new SSEClient({
   credentials: 'include',              // 默认 undefined；POST 凭据（include/same-origin/omit）
   token: undefined,                    // 默认 undefined；POST 默认 Authorization: Bearer <token>
 
-  // ========== 连接保护与重连 ========== 
+  // ========== 连接保护与重连 ==========
   maxListeners: 1000,                  // 默认 1000；监听器数量上限，防内存泄漏
   reconnectBackoff: {                  // 指数退避 + 抖动
     baseMs: 1000,                      // 起始基准延迟（ms）
@@ -126,12 +144,12 @@ const controller = new AbortController();
 const { requestId, unsubscribe } = await sse.postAndListen(
   '/api/doA',                          // POST URL
   { foo: 'bar' },                      // 请求体（库会附加 requestId）
-  ({ event, payload }) => {            // 事件回调：progress/done/error/ping/自定义
-    if (event === 'progress') {
+  ({ phase, payload }) => {            // 事件回调：progress/done/error/ping/自定义
+    if (phase === 'progress') {
       // 处理进度
-    } else if (event === 'done') {
+    } else if (phase === 'done') {
       // 处理完成（自动取消该 requestId 的监听）
-    } else if (event === 'error') {
+    } else if (phase === 'error') {
       // 处理错误（自动取消该 requestId 的监听）
     }
   },
@@ -210,8 +228,8 @@ import { SSEClient } from 'vsse';
 const sse = new SSEClient({ url: '/sse?userId=alice', eventName: 'notify' });
 
 // 订阅全局广播（例如系统公告/会话状态）
-const off = sse.onBroadcast(({ event, type, payload }) => {
-  if (event === 'progress' && type === 'system') {
+const off = sse.onBroadcast(({ phase, type, payload }) => {
+  if (phase === 'progress' && type === 'system') {
     console.log('系统公告：', payload?.content);
   }
 });
@@ -237,15 +255,15 @@ data: {"event":"progress","type":"system","payload":{"content":"今晚 2:00 维�
 ```
 # 进度：需求卡
 event: notify
-data: {"requestId":"<uuid>","event":"progress","type":"need","payload":{"content":"<html or markdown>"}}
+data: {"requestId":"<uuid>","phase":"progress","type":"need","payload":{"content":"<html or markdown>"}}
 
 # 进度：聊天分片
 event: notify
-data: {"requestId":"<uuid>","event":"progress","type":"chat","payload":{"content":"文本分片"}}
+data: {"requestId":"<uuid>","phase":"progress","type":"chat","payload":{"content":"文本分片"}}
 
 # 完成
 event: notify
-data: {"requestId":"<uuid>","event":"done","payload":{"content":"完整文本","length":1234}}
+data: {"requestId":"<uuid>","phase":"done","payload":{"content":"完整文本","length":1234}}
 ```
 
 ## CORS、凭据与 EventSource 限制
