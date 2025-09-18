@@ -196,6 +196,20 @@ const { requestId, unsubscribe } = await sse.postAndListen(
 - 重连退避：断开后按照 reconnectBackoff 进行指数退避并带抖动，避免雪崩；首次大约 baseMs。
 - 注意：后台标签页可能被浏览器节流，表现为定时器/回调延迟。
 
+### 如何让客户端断线重连每 2 秒一次
+将重连退避配置为“固定 2000ms”即可（baseMs=maxMs=2000，factor=1，jitter=0）。
+示例：
+```js
+const sse = new SSEClient({
+    url: '/sse?userId=alice',
+    reconnectBackoff: { baseMs: 2000, maxMs: 2000, factor: 1, jitter: 0 },
+});
+```
+运行期动态调整：
+```js
+sse.updateConfig({ reconnectBackoff: { baseMs: 2000, maxMs: 2000, factor: 1, jitter: 0 } });
+```
+
 服务端心跳示例（建议每 expectedPingInterval 发送一次）：
 ```
 event: notify
